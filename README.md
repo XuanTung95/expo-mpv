@@ -22,6 +22,7 @@ On iOS it uses [MPVKit](https://github.com/mpvkit/MPVKit). On Android it integra
 - Track inspection via `getTrackList()` and `getCurrentTrackIds()`
 - Media info via `getMediaInfo()` (codec, resolution, fps, bitrate, hwdec status, HDR)
 - CJK subtitle support with bundled Noto Sans CJK SC font
+- System Picture in Picture on iOS and Android
 
 ## Installation
 
@@ -124,6 +125,9 @@ playerRef.current?.seekBy(-10); // relative seconds
 playerRef.current?.setSpeed(1.5);
 playerRef.current?.setVolume(80); // 0-100
 playerRef.current?.setMuted(true);
+if (await playerRef.current?.isPictureInPictureSupported()) {
+  await playerRef.current?.startPictureInPicture();
+}
 playerRef.current?.setSubtitleTrack(2);
 playerRef.current?.setAudioTrack(1);
 playerRef.current?.addSubtitle('https://example.com/subs.srt');
@@ -165,6 +169,7 @@ const media = await playerRef.current?.getMediaInfo();
 | `onSeek`                | `{}`                                                                                       | Seek completed                                                                                                 |
 | `onVolumeChange`        | `{ volume, muted }`                                                                        | Volume/mute changed                                                                                            |
 | `onHdrStateChange`      | `{ isHdr, hdrActive, sigPeak, hdrFormat }`                                                 | HDR/Dolby Vision content detected / display support changed                                                    |
+| `onPictureInPictureChange` | `{ active }`                                                                                | System Picture in Picture state changed                                                                        |
 
 ### Imperative API
 
@@ -179,6 +184,10 @@ const media = await playerRef.current?.getMediaInfo();
 - `setSpeed(speed)`
 - `setVolume(volume)`
 - `setMuted(muted)`
+- `isPictureInPictureSupported()`
+- `isPictureInPictureActive()`
+- `startPictureInPicture(sourceRect?)`
+- `stopPictureInPicture()`
 - `setSubtitleTrack(trackId)`
 - `setAudioTrack(trackId)`
 - `addSubtitle(path, flag?, title?, lang?)` — external subtitle; `flag` defaults to `select` (shown immediately)

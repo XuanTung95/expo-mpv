@@ -92,6 +92,10 @@ export type HdrStateChangeEvent = {
   hdrFormat: string;
 };
 
+export type PictureInPictureChangeEvent = {
+  active: boolean;
+};
+
 export type PlaybackInfo = {
   position: number;
   duration: number;
@@ -243,6 +247,9 @@ export type ExpoMpvViewProps = {
    */
   onHdrStateChange?: (event: { nativeEvent: HdrStateChangeEvent }) => void;
 
+  /** Called when system Picture in Picture starts or stops. */
+  onPictureInPictureChange?: (event: { nativeEvent: PictureInPictureChangeEvent }) => void;
+
   style?: StyleProp<ViewStyle>;
 };
 
@@ -258,6 +265,10 @@ export type ExpoMpvViewRef = {
   setSpeed: (speed: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;
+  isPictureInPictureSupported: () => Promise<boolean>;
+  isPictureInPictureActive: () => Promise<boolean>;
+  startPictureInPicture: (sourceRect?: { x: number; y: number; width: number; height: number }) => Promise<boolean>;
+  stopPictureInPicture: () => Promise<void>;
   setSubtitleTrack: (trackId: number) => Promise<void>;
   setAudioTrack: (trackId: number) => Promise<void>;
   /**

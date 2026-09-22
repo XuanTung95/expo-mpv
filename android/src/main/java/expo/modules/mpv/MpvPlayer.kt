@@ -16,13 +16,14 @@ internal class MpvPlayer(
 ) {
     interface Listener {
         fun onPlaybackStateChange(state: String, isPlaying: Boolean)
-        fun onProgress(position: Double, duration: Double, bufferedDuration: Double)
+        fun onProgress(position: Double, duration: Double, bufferedDuration: Double, bufferedPosition: Double, bufferRate: Double, bufferingPercent: Double)
         fun onLoad(duration: Double, width: Int, height: Int)
         fun onError(message: String)
         fun onEnd(reason: String)
         fun onBuffer(isBuffering: Boolean)
         fun onSeek()
         fun onVolumeChange(volume: Double, muted: Boolean)
+        fun onHdrStateChange(isHdr: Boolean, sigPeak: Double, hdrFormat: String)
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -46,12 +47,16 @@ internal class MpvPlayer(
     @Volatile private var cachedTimePos: Double = 0.0
     @Volatile private var cachedDuration: Double = 0.0
     @Volatile private var cachedCacheDuration: Double = 0.0
+    @Volatile private var cachedCacheTime: Double = 0.0
+    @Volatile private var cachedBufferingPercent: Double = 100.0
     @Volatile private var cachedPause: Boolean = false
     @Volatile private var cachedVolume: Double = 100.0
     @Volatile private var cachedMute: Boolean = false
     @Volatile private var cachedSpeed: Double = 1.0
     @Volatile private var cachedVideoW: Long = 0
     @Volatile private var cachedVideoH: Long = 0
+    @Volatile private var cachedSigPeak: Double = 0.0
+    @Volatile private var cachedHdrFormat: String = ""
 
     init {
         runOnPlayerThread {
@@ -313,6 +318,8 @@ internal class MpvPlayer(
                 "audioBitrate" to (if (audioBitrate.isFinite()) audioBitrate else 0.0),
                 "pixelFormat" to pixelFormat,
                 "colorspace" to colorspace,
+                "isHdr" to (getPropertyStringLocked("video-params/gamma") == "pq" || getPropertyStringLocked("video-params/gamma") == "hlg" || getPropertyDoubleLocked("video-params/sig-peak") > 1.0),
+                "hdrFormat" to (getPropertyStringLocked("video-params/gamma") ?: ""),
             )
         }
     }
@@ -357,6 +364,16 @@ internal class MpvPlayer(
             "time-pos" -> cachedTimePos = (value as? Double) ?: 0.0
             "duration" -> cachedDuration = (value as? Double) ?: 0.0
             "demuxer-cache-duration" -> cachedCacheDuration = (value as? Double) ?: 0.0
+            "demuxer-cache-time" -> cachedCacheTime = (value as? Double) ?: 0.0
+            "cache-buffering-state" -> cachedBufferingPercent = (value as? Double) ?: 100.0
+            "video-params/sig-peak" -> {
+                cachedSigPeak = (value as? Double) ?: 0.0
+                dispatchOnMain { listener.onHdrStateChange(cachedSigPeak > 1.0, cachedSigPeak, cachedHdrFormat) }
+            }
+            "video-params/gamma" -> {
+                cachedHdrFormat = (value as? String) ?: ""
+                dispatchOnMain { listener.onHdrStateChange(cachedSigPeak > 1.0 || cachedHdrFormat == "pq" || cachedHdrFormat == "hlg", cachedSigPeak, cachedHdrFormat) }
+            }
             "pause" -> {
                 val paused = (value as? Boolean) ?: false
                 if (hasPauseState && paused == cachedPause) return
@@ -508,6 +525,10 @@ internal class MpvPlayer(
         MPVLib.nativeObserveProperty(ptr, "mute", MPVLib.FORMAT_FLAG)
         MPVLib.nativeObserveProperty(ptr, "speed", MPVLib.FORMAT_DOUBLE)
         MPVLib.nativeObserveProperty(ptr, "demuxer-cache-duration", MPVLib.FORMAT_DOUBLE)
+        MPVLib.nativeObserveProperty(ptr, "demuxer-cache-time", MPVLib.FORMAT_DOUBLE)
+        MPVLib.nativeObserveProperty(ptr, "cache-buffering-state", MPVLib.FORMAT_DOUBLE)
+        MPVLib.nativeObserveProperty(ptr, "video-params/sig-peak", MPVLib.FORMAT_DOUBLE)
+        MPVLib.nativeObserveProperty(ptr, "video-params/gamma", MPVLib.FORMAT_STRING)
         MPVLib.nativeObserveProperty(ptr, "video-params/w", MPVLib.FORMAT_INT64)
         MPVLib.nativeObserveProperty(ptr, "video-params/h", MPVLib.FORMAT_INT64)
     }
@@ -542,6 +563,8 @@ internal class MpvPlayer(
         if (cacheDuration.isFinite() && cacheDuration >= 0) {
             cachedCacheDuration = cacheDuration
         }
+        val cacheTime = getPropertyDoubleLocked("demuxer-cache-time")
+        if (cacheTime.isFinite() && cacheTime >= 0) cachedCacheTime = cacheTime
 
         val width = getPropertyLongLocked("video-params/w")
         if (width > 0) {
@@ -616,7 +639,9 @@ internal class MpvPlayer(
         lastProgressEmitDuration = duration
         lastProgressEmitBufferedDuration = bufferedDuration
 
-        listener.onProgress(position, duration, bufferedDuration)
+        val bufferedPosition = if (cachedCacheTime.isFinite()) cachedCacheTime else 0.0
+        val bufferingPercent = if (lastBufferingState == true) cachedBufferingPercent.coerceIn(0.0, 100.0) else 100.0
+        listener.onProgress(position, duration, bufferedDuration, bufferedPosition, 0.0, bufferingPercent)
     }
 
     private fun emitError(message: String) {

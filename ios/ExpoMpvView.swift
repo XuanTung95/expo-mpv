@@ -1,6 +1,7 @@
 import ExpoModulesCore
 import Libmpv
 import CoreText
+import AVKit
 
 class ExpoMpvView: ExpoView {
   // MARK: - Metal Layer
@@ -18,6 +19,7 @@ class ExpoMpvView: ExpoView {
   private var pendingSource: String?
   private var pendingHwdec: String = "videotoolbox"
   private var progressTimer: Timer?
+  @available(iOS 15.0, *) private var pictureInPicture: ExpoMpvPictureInPicture?
 
   /// Whether a source has been requested (loadfile issued and not stopped).
   /// Distinguishes "idle" (no media) from "loading" (media coming up).
@@ -36,6 +38,7 @@ class ExpoMpvView: ExpoView {
   let onSeek = EventDispatcher()
   let onVolumeChange = EventDispatcher()
   let onHdrStateChange = EventDispatcher()
+  let onPictureInPictureChange = EventDispatcher()
 
   // MARK: - Init
 
@@ -149,6 +152,12 @@ class ExpoMpvView: ExpoView {
     }
 
     isInitialized = true
+    if #available(iOS 15.0, *) {
+      pictureInPicture = ExpoMpvPictureInPicture(handle: mpv) { [weak self] playing in
+        guard let self else { return }
+        if playing { self.play() } else { self.pause() }
+      }
+    }
     log("mpv initialized successfully")
 
     // Observe properties
@@ -200,6 +209,7 @@ class ExpoMpvView: ExpoView {
 
   @objc private func appDidEnterBackground() {
     guard mpv != nil else { return }
+    if #available(iOS 15.0, *), pictureInPicture?.isActive == true { return }
     mpv_set_property_string(mpv, "vid", "no")
   }
 
@@ -527,6 +537,38 @@ class ExpoMpvView: ExpoView {
     setFlag("mute", muted)
   }
 
+  func isPictureInPictureSupported() -> Bool {
+    if #available(iOS 15.0, *) { return AVPictureInPictureController.isPictureInPictureSupported() }
+    return false
+  }
+
+  func isPictureInPictureActive() -> Bool {
+    if #available(iOS 15.0, *) { return pictureInPicture?.isActive == true }
+    return false
+  }
+
+  func startPictureInPicture(sourceRect: [String: Double]?) -> Bool {
+    guard #available(iOS 15.0, *), let mpv else { return false }
+    let rect = sourceRect.map {
+      CGRect(x: $0["x"] ?? 0, y: $0["y"] ?? 0, width: $0["width"] ?? bounds.width, height: $0["height"] ?? bounds.height)
+    }
+    let started = pictureInPicture?.start(
+      playing: !getFlag("pause"),
+      sourceRect: rect,
+      width: getInt("video-params/w"),
+      height: getInt("video-params/h")
+    ) == true
+    if started { onPictureInPictureChange(["active": true]) }
+    _ = mpv
+    return started
+  }
+
+  func stopPictureInPicture() {
+    guard #available(iOS 15.0, *) else { return }
+    pictureInPicture?.stop()
+    onPictureInPictureChange(["active": false])
+  }
+
   func setLooping(_ loop: Bool) {
     guard mpv != nil else { return }
     mpv_set_property_string(mpv, "loop-file", loop ? "inf" : "no")
@@ -705,6 +747,7 @@ class ExpoMpvView: ExpoView {
 
   func destroy() {
     stopProgressTimer()
+    if #available(iOS 15.0, *) { pictureInPicture?.stop(); pictureInPicture = nil }
     if let mpv = mpv {
       log("Destroying mpv...")
       mpv_set_wakeup_callback(mpv, nil, nil)

@@ -17,7 +17,8 @@ public class ExpoMpvModule: Module {
         "onBuffer",
         "onSeek",
         "onVolumeChange",
-        "onHdrStateChange"
+        "onHdrStateChange",
+        "onPictureInPictureChange"
       )
 
       // MARK: - Props
@@ -94,6 +95,22 @@ public class ExpoMpvModule: Module {
 
       AsyncFunction("setMuted") { (view: ExpoMpvView, muted: Bool) in
         view.setMuted(muted)
+      }.runOnQueue(.main)
+
+      AsyncFunction("isPictureInPictureSupported") { (view: ExpoMpvView) -> Bool in
+        view.isPictureInPictureSupported()
+      }.runOnQueue(.main)
+
+      AsyncFunction("isPictureInPictureActive") { (view: ExpoMpvView) -> Bool in
+        view.isPictureInPictureActive()
+      }.runOnQueue(.main)
+
+      AsyncFunction("startPictureInPicture") { (view: ExpoMpvView, sourceRect: [String: Double]?) -> Bool in
+        view.startPictureInPicture(sourceRect: sourceRect)
+      }.runOnQueue(.main)
+
+      AsyncFunction("stopPictureInPicture") { (view: ExpoMpvView) in
+        view.stopPictureInPicture()
       }.runOnQueue(.main)
 
       AsyncFunction("setSubtitleTrack") { (view: ExpoMpvView, trackId: Int) in

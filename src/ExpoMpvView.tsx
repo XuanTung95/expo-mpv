@@ -39,6 +39,14 @@ function ExpoMpvView(props: ExpoMpvViewComponentProps) {
       setSpeed: (speed: number) => nativeRef.current?.setSpeed(speed) ?? Promise.resolve(),
       setVolume: (volume: number) => nativeRef.current?.setVolume(volume) ?? Promise.resolve(),
       setMuted: (muted: boolean) => nativeRef.current?.setMuted(muted) ?? Promise.resolve(),
+      isPictureInPictureSupported: () =>
+        nativeRef.current?.isPictureInPictureSupported() ?? Promise.resolve(false),
+      isPictureInPictureActive: () =>
+        nativeRef.current?.isPictureInPictureActive() ?? Promise.resolve(false),
+      startPictureInPicture: (sourceRect) =>
+        nativeRef.current?.startPictureInPicture(sourceRect) ?? Promise.resolve(false),
+      stopPictureInPicture: () =>
+        nativeRef.current?.stopPictureInPicture() ?? Promise.resolve(),
       setSubtitleTrack: (trackId: number) =>
         nativeRef.current?.setSubtitleTrack(trackId) ?? Promise.resolve(),
       setAudioTrack: (trackId: number) =>
@@ -83,6 +91,8 @@ function ExpoMpvView(props: ExpoMpvViewComponentProps) {
           audioBitrate: 0,
           pixelFormat: '',
           colorspace: '',
+          isHdr: false,
+          hdrFormat: '',
         }),
     }),
     [ref],

@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { ConfigPlugin, withDangerousMod } from 'expo/config-plugins';
+import { ConfigPlugin, withDangerousMod, withInfoPlist } from 'expo/config-plugins';
 import fs from 'fs';
 import https from 'https';
 import path from 'path';
@@ -139,6 +139,17 @@ async function downloadMPVKit(frameworksDir: string): Promise<void> {
 }
 
 const withExpoMpv: ConfigPlugin = (config) => {
+  // PiP is allowed to keep audio/video running after the app leaves the
+  // foreground. Add the playback background mode during prebuild.
+  config = withInfoPlist(config, (config) => {
+    const modes = Array.isArray(config.modResults.UIBackgroundModes)
+      ? config.modResults.UIBackgroundModes
+      : [];
+    if (!modes.includes('audio')) modes.push('audio');
+    config.modResults.UIBackgroundModes = modes;
+    return config;
+  });
+
   // iOS: download MPVKit xcframeworks during prebuild
   config = withDangerousMod(config, [
     'ios',

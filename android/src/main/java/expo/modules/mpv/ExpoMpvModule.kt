@@ -17,7 +17,9 @@ class ExpoMpvModule : Module() {
                 "onEnd",
                 "onBuffer",
                 "onSeek",
-                "onVolumeChange"
+                "onVolumeChange",
+                "onPictureInPictureChange",
+                "onHdrStateChange"
             )
 
             // Props (same as iOS)
@@ -90,6 +92,22 @@ class ExpoMpvModule : Module() {
                 view.setMuted(muted)
             }
 
+            AsyncFunction("isPictureInPictureSupported") { view: ExpoMpvView ->
+                view.isPictureInPictureSupported()
+            }
+
+            AsyncFunction("isPictureInPictureActive") { view: ExpoMpvView ->
+                view.isPictureInPictureActive()
+            }
+
+            AsyncFunction("startPictureInPicture") { view: ExpoMpvView, sourceRect: Map<String, Double>? ->
+                view.startPictureInPicture(sourceRect)
+            }
+
+            AsyncFunction("stopPictureInPicture") { view: ExpoMpvView ->
+                view.stopPictureInPicture()
+            }
+
             AsyncFunction("setSubtitleTrack") { view: ExpoMpvView, trackId: Int ->
                 view.setSubtitleTrack(trackId)
             }
@@ -99,7 +117,7 @@ class ExpoMpvModule : Module() {
             }
 
             AsyncFunction("addSubtitle") { view: ExpoMpvView, path: String, flag: String?, title: String?, lang: String? ->
-                view.addSubtitle(path, flag ?: "auto", title, lang)
+                view.addSubtitle(path, flag ?: "select", title, lang)
             }
 
             AsyncFunction("removeSubtitle") { view: ExpoMpvView, trackId: Int ->
