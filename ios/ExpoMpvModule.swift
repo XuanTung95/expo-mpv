@@ -4,6 +4,10 @@ public class ExpoMpvModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ExpoMpv")
 
+    AsyncFunction("releaseSession") { (sessionId: String) in
+      ExpoMpvView.releaseSession(sessionId)
+    }.runOnQueue(.main)
+
     // MARK: - View
 
     View(ExpoMpvView.self) {
@@ -22,147 +26,154 @@ public class ExpoMpvModule: Module {
       )
 
       // MARK: - Props
+      Prop("sessionId") { (view: ExpoMpvView, sessionId: String?) in
+        if let sessionId { view.attachSession(sessionId) }
+      }
+
 
       Prop("source") { (view: ExpoMpvView, source: String?) in
         if let source = source {
-          view.loadFile(source)
+          view.playerView.loadFile(source)
         }
       }
 
       Prop("paused") { (view: ExpoMpvView, paused: Bool) in
         if paused {
-          view.pause()
+          view.playerView.pause()
         } else {
-          view.play()
+          view.playerView.play()
         }
       }
 
       Prop("speed") { (view: ExpoMpvView, speed: Double) in
-        view.setSpeed(speed)
+        view.playerView.setSpeed(speed)
       }
 
       Prop("volume") { (view: ExpoMpvView, volume: Double) in
-        view.setVolume(volume)
+        view.playerView.setVolume(volume)
       }
 
       Prop("muted") { (view: ExpoMpvView, muted: Bool) in
-        view.setMuted(muted)
+        view.playerView.setMuted(muted)
       }
 
       Prop("loop") { (view: ExpoMpvView, loop: Bool) in
-        view.setLooping(loop)
+        view.playerView.setLooping(loop)
       }
 
       Prop("hwdec") { (view: ExpoMpvView, hwdec: String?) in
         if let hwdec = hwdec {
-          view.setHwdec(hwdec)
+          view.playerView.setHwdec(hwdec)
         }
       }
 
       // MARK: - Imperative Functions (called via ref)
 
       AsyncFunction("play") { (view: ExpoMpvView) in
-        view.play()
+        view.playerView.play()
       }.runOnQueue(.main)
 
       AsyncFunction("pause") { (view: ExpoMpvView) in
-        view.pause()
+        view.playerView.pause()
       }.runOnQueue(.main)
 
       AsyncFunction("togglePlay") { (view: ExpoMpvView) in
-        view.togglePlay()
+        view.playerView.togglePlay()
       }.runOnQueue(.main)
 
       AsyncFunction("stop") { (view: ExpoMpvView) in
-        view.stop()
+        view.playerView.stop()
       }.runOnQueue(.main)
 
       AsyncFunction("seekTo") { (view: ExpoMpvView, position: Double) in
-        view.seekTo(position)
+        view.playerView.seekTo(position)
       }.runOnQueue(.main)
 
       AsyncFunction("seekBy") { (view: ExpoMpvView, offset: Double) in
-        view.seekBy(offset)
+        view.playerView.seekBy(offset)
       }.runOnQueue(.main)
 
       AsyncFunction("setSpeed") { (view: ExpoMpvView, speed: Double) in
-        view.setSpeed(speed)
+        view.playerView.setSpeed(speed)
       }.runOnQueue(.main)
 
       AsyncFunction("setVolume") { (view: ExpoMpvView, volume: Double) in
-        view.setVolume(volume)
+        view.playerView.setVolume(volume)
       }.runOnQueue(.main)
 
       AsyncFunction("setMuted") { (view: ExpoMpvView, muted: Bool) in
-        view.setMuted(muted)
+        view.playerView.setMuted(muted)
       }.runOnQueue(.main)
 
       AsyncFunction("isPictureInPictureSupported") { (view: ExpoMpvView) -> Bool in
-        view.isPictureInPictureSupported()
+        view.playerView.isPictureInPictureSupported()
       }.runOnQueue(.main)
 
       AsyncFunction("isPictureInPictureActive") { (view: ExpoMpvView) -> Bool in
-        view.isPictureInPictureActive()
+        view.playerView.isPictureInPictureActive()
       }.runOnQueue(.main)
 
-      AsyncFunction("startPictureInPicture") { (view: ExpoMpvView, sourceRect: [String: Double]?) -> Bool in
-        view.startPictureInPicture(sourceRect: sourceRect)
+      AsyncFunction("startPictureInPicture") { (view: ExpoMpvView, sourceRect: [String: Double]?, promise: Promise) in
+        view.playerView.startPictureInPicture(sourceRect: sourceRect) { started, error in
+          if started { promise.resolve(true) }
+          else { promise.reject("ERR_MPV_PIP_START", error ?? "PiP failed to start") }
+        }
       }.runOnQueue(.main)
 
       AsyncFunction("stopPictureInPicture") { (view: ExpoMpvView) in
-        view.stopPictureInPicture()
+        view.playerView.stopPictureInPicture()
       }.runOnQueue(.main)
 
       AsyncFunction("setSubtitleTrack") { (view: ExpoMpvView, trackId: Int) in
-        view.setSubtitleTrack(trackId)
+        view.playerView.setSubtitleTrack(trackId)
       }.runOnQueue(.main)
 
       AsyncFunction("setAudioTrack") { (view: ExpoMpvView, trackId: Int) in
-        view.setAudioTrack(trackId)
+        view.playerView.setAudioTrack(trackId)
       }.runOnQueue(.main)
 
       AsyncFunction("addSubtitle") { (view: ExpoMpvView, path: String, flag: String?, title: String?, lang: String?) in
-        view.addSubtitle(path, flag: flag ?? "select", title: title, lang: lang)
+        view.playerView.addSubtitle(path, flag: flag ?? "select", title: title, lang: lang)
       }.runOnQueue(.main)
 
       AsyncFunction("removeSubtitle") { (view: ExpoMpvView, trackId: Int) in
-        view.removeSubtitle(trackId)
+        view.playerView.removeSubtitle(trackId)
       }.runOnQueue(.main)
 
       AsyncFunction("reloadSubtitles") { (view: ExpoMpvView) in
-        view.reloadSubtitles()
+        view.playerView.reloadSubtitles()
       }.runOnQueue(.main)
 
       AsyncFunction("addAudio") { (view: ExpoMpvView, path: String, flag: String?, title: String?, lang: String?) in
-        view.addAudio(path, flag: flag ?? "select", title: title, lang: lang)
+        view.playerView.addAudio(path, flag: flag ?? "select", title: title, lang: lang)
       }.runOnQueue(.main)
 
       AsyncFunction("removeAudio") { (view: ExpoMpvView, trackId: Int) in
-        view.removeAudio(trackId)
+        view.playerView.removeAudio(trackId)
       }.runOnQueue(.main)
 
       AsyncFunction("setSubtitleDelay") { (view: ExpoMpvView, seconds: Double) in
-        view.setSubtitleDelay(seconds)
+        view.playerView.setSubtitleDelay(seconds)
       }.runOnQueue(.main)
 
       AsyncFunction("setPropertyString") { (view: ExpoMpvView, name: String, value: String) in
-        view.setPropertyString(name, value)
+        view.playerView.setPropertyString(name, value)
       }.runOnQueue(.main)
 
       AsyncFunction("getPlaybackInfo") { (view: ExpoMpvView) -> [String: Any] in
-        return view.getPlaybackInfo()
+        return view.playerView.getPlaybackInfo()
       }.runOnQueue(.main)
 
       AsyncFunction("getTrackList") { (view: ExpoMpvView) -> [[String: Any]] in
-        return view.getTrackList()
+        return view.playerView.getTrackList()
       }.runOnQueue(.main)
 
       AsyncFunction("getCurrentTrackIds") { (view: ExpoMpvView) -> [String: Int] in
-        return view.getCurrentTrackIds()
+        return view.playerView.getCurrentTrackIds()
       }.runOnQueue(.main)
 
       AsyncFunction("getMediaInfo") { (view: ExpoMpvView) -> [String: Any] in
-        return view.getMediaInfo()
+        return view.playerView.getMediaInfo()
       }.runOnQueue(.main)
     }
   }

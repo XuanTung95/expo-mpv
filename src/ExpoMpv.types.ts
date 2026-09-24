@@ -94,6 +94,7 @@ export type HdrStateChangeEvent = {
 
 export type PictureInPictureChangeEvent = {
   active: boolean;
+  error?: string;
 };
 
 export type PlaybackInfo = {
@@ -165,6 +166,8 @@ export type ExpoMpvModuleEvents = Record<never, never>;
 // MARK: - View Props
 
 export type ExpoMpvViewProps = {
+  /** Keeps one native mpv instance alive while views are replaced (for example, fullscreen). */
+  sessionId?: string;
   /**
    * Media source URL to play. Can be a remote URL or a local file path.
    */
@@ -267,7 +270,12 @@ export type ExpoMpvViewRef = {
   setMuted: (muted: boolean) => Promise<void>;
   isPictureInPictureSupported: () => Promise<boolean>;
   isPictureInPictureActive: () => Promise<boolean>;
-  startPictureInPicture: (sourceRect?: { x: number; y: number; width: number; height: number }) => Promise<boolean>;
+  startPictureInPicture: (sourceRect?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => Promise<boolean>;
   stopPictureInPicture: () => Promise<void>;
   setSubtitleTrack: (trackId: number) => Promise<void>;
   setAudioTrack: (trackId: number) => Promise<void>;

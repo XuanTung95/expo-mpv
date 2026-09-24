@@ -1,7 +1,6 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { ConfigPlugin, withDangerousMod, withInfoPlist } from 'expo/config-plugins';
 import fs from 'fs';
-import https from 'https';
 import path from 'path';
 
 const MPVKIT_VERSION = '0.41.0';
@@ -83,55 +82,58 @@ function getFrameworkSources(): FrameworkSource[] {
   ];
 }
 
-function download(url: string, dest: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
-    const request = (url: string) => {
-      https
-        .get(url, (res) => {
-          if (res.statusCode === 301 || res.statusCode === 302) {
-            request(res.headers.location!);
-            return;
-          }
-          if (res.statusCode !== 200) {
-            reject(new Error(`Failed to download ${url}: ${res.statusCode}`));
-            return;
-          }
-          res.pipe(file);
-          file.on('finish', () => {
-            file.close();
-            resolve();
-          });
-        })
-        .on('error', reject);
-    };
-    request(url);
-  });
-}
-
-async function downloadFramework(source: FrameworkSource, frameworksDir: string): Promise<void> {
+function downloadFramework(source: FrameworkSource, frameworksDir: string): void {
   const zipPath = path.join(frameworksDir, `${source.name}.zip`);
-  await download(source.url, zipPath);
-  execSync(`unzip -q -o "${zipPath}" -d "${frameworksDir}"`, { stdio: 'pipe' });
+  execFileSync(
+    'curl',
+    [
+      '--location',
+      '--fail',
+      '--retry',
+      '10',
+      '--retry-all-errors',
+      '--retry-delay',
+      '2',
+      '--continue-at',
+      '-',
+      '--silent',
+      '--show-error',
+      '--output',
+      zipPath,
+      source.url,
+    ],
+    { stdio: 'inherit' },
+  );
+  execFileSync('unzip', ['-q', '-o', zipPath, '-d', frameworksDir]);
   fs.unlinkSync(zipPath);
 }
 
-async function downloadMPVKit(frameworksDir: string): Promise<void> {
+export async function downloadMPVKit(frameworksDir: string): Promise<void> {
   const lockfile = path.join(frameworksDir, '.version');
+  const sources = getFrameworkSources();
 
-  if (fs.existsSync(lockfile) && fs.readFileSync(lockfile, 'utf-8').trim() === MPVKIT_VERSION) {
+  if (
+    fs.existsSync(lockfile) &&
+    fs.readFileSync(lockfile, 'utf-8').trim() === MPVKIT_VERSION &&
+    sources.every(({ name }) =>
+      fs.existsSync(path.join(frameworksDir, `${name}.xcframework`, 'Info.plist')),
+    )
+  ) {
     console.log(`[expo-mpv] MPVKit ${MPVKIT_VERSION} already downloaded.`);
     return;
   }
 
   console.log(`[expo-mpv] Downloading MPVKit ${MPVKIT_VERSION} XCFrameworks...`);
-  fs.rmSync(frameworksDir, { recursive: true, force: true });
+  if (fs.existsSync(lockfile) && fs.readFileSync(lockfile, 'utf-8').trim() !== MPVKIT_VERSION) {
+    fs.rmSync(frameworksDir, { recursive: true, force: true });
+  }
   fs.mkdirSync(frameworksDir, { recursive: true });
 
-  const sources = getFrameworkSources();
   for (const source of sources) {
+    if (fs.existsSync(path.join(frameworksDir, `${source.name}.xcframework`, 'Info.plist')))
+      continue;
     console.log(`  ${source.name}...`);
-    await downloadFramework(source, frameworksDir);
+    downloadFramework(source, frameworksDir);
   }
 
   fs.writeFileSync(lockfile, MPVKIT_VERSION);

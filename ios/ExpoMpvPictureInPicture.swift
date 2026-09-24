@@ -1,130 +1,177 @@
 import AVFoundation
 import AVKit
-import CoreMedia
-import CoreVideo
 import UIKit
-import Libmpv
 
-/// Small sample-buffer bridge used by system PiP. The normal view continues to
-/// use mpv's Metal output; this second render context copies frames only while
-/// PiP is active.
+/// AVKit consumes the SAME layer/frames as inline playback. No second mpv core,
+/// hidden 2x2 view, polling renderer, URL reload or playback synchronization.
 @available(iOS 15.0, *)
-final class ExpoMpvPictureInPicture: NSObject, AVPictureInPictureSampleBufferPlaybackDelegate {
-  private let handle: OpaquePointer
-  private let displayLayer = AVSampleBufferDisplayLayer()
-  private var renderContext: OpaquePointer?
+final class ExpoMpvPictureInPicture: NSObject, AVPictureInPictureSampleBufferPlaybackDelegate, AVPictureInPictureControllerDelegate {
+  static let revision = "shared-frame-v1"
+  private let displayLayer: AVSampleBufferDisplayLayer
   private var controller: AVPictureInPictureController?
-  private var timer: Timer?
-  private var size = CGSize(width: 640, height: 360)
+  private var watchdog: Timer?
+  private var deadline: Date?
+  private var requested = false
+  private var startCompletion: ((Bool, String?) -> Void)?
   private var playing = false
+  private var duration: Double = 0
+  private var hasFrame = false
   private var active = false
+  private var disposed = false
   private let onPlaybackChange: (Bool) -> Void
+  private let onSeek: (Double) -> Void
+  private let onActiveChange: (Bool) -> Void
+  private let onFailure: (String) -> Void
 
-  init(handle: OpaquePointer, onPlaybackChange: @escaping (Bool) -> Void) {
-    self.handle = handle
+  init(displayLayer: AVSampleBufferDisplayLayer, onPlaybackChange: @escaping (Bool) -> Void,
+       onSeek: @escaping (Double) -> Void, onActiveChange: @escaping (Bool) -> Void,
+       onFailure: @escaping (String) -> Void) {
+    self.displayLayer = displayLayer
     self.onPlaybackChange = onPlaybackChange
+    self.onSeek = onSeek
+    self.onActiveChange = onActiveChange
+    self.onFailure = onFailure
     super.init()
-    displayLayer.videoGravity = .resizeAspect
   }
 
-  deinit { stop() }
+  var isActive: Bool { active || controller?.isPictureInPictureActive == true }
+  var isStarting: Bool { startCompletion != nil }
 
-  var isActive: Bool { active }
-
-  func start(playing: Bool, sourceRect: CGRect?, width: Int64, height: Int64) -> Bool {
-    guard AVPictureInPictureController.isPictureInPictureSupported() else { return false }
-    self.playing = playing
-    if width > 0, height > 0 { size = CGSize(width: width, height: height) }
-    guard makeRenderContext(), let context = controller else { return false }
-    if let sourceRect { context.sourceRectHint = sourceRect }
-    renderFrame()
-    active = true
-    timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-      self?.renderFrame()
+  /// Prewarm AVKit once the primary renderer has supplied a real video frame.
+  func didEnqueueFrame() {
+    guard !disposed else { return }
+    hasFrame = true
+    if controller == nil && AVPictureInPictureController.isPictureInPictureSupported() {
+      let source = AVPictureInPictureController.ContentSource(
+        sampleBufferDisplayLayer: displayLayer, playbackDelegate: self)
+      let controller = AVPictureInPictureController(contentSource: source)
+      controller.delegate = self
+      controller.canStartPictureInPictureAutomaticallyFromInline = false
+      self.controller = controller
     }
-    context.startPictureInPicture()
-    return true
+    attemptStart()
+  }
+
+  func updatePlayback(playing: Bool, duration: Double) {
+    let changed = self.playing != playing || self.duration != duration
+    self.playing = playing
+    self.duration = duration.isFinite ? max(0, duration) : 0
+    if changed { controller?.invalidatePlaybackState() }
+  }
+
+  func start(hostView: UIView, completion: @escaping (Bool, String?) -> Void) {
+    guard !disposed else { completion(false, "PiP player was disposed"); return }
+    if isActive { completion(true, nil); return }
+    guard startCompletion == nil else { completion(false, "PiP is already starting"); return }
+    startCompletion = completion
+    guard AVPictureInPictureController.isPictureInPictureSupported() else {
+      fail("PiP is not supported"); return
+    }
+    guard hostView.window != nil else {
+      fail("Player is not attached to a window"); return
+    }
+    do {
+      let audio = AVAudioSession.sharedInstance()
+      try audio.setCategory(.playback, mode: .moviePlayback)
+      try audio.setActive(true)
+    } catch {
+      fail("Audio session: \(error)"); return
+    }
+    deadline = Date().addingTimeInterval(8)
+    let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.attemptStart() }
+    watchdog = timer
+    RunLoop.main.add(timer, forMode: .common)
+    attemptStart()
+  }
+
+  private func attemptStart() {
+    guard startCompletion != nil else { return }
+    if let controller, controller.isPictureInPictureActive {
+      pictureInPictureControllerDidStartPictureInPicture(controller)
+      return
+    }
+    if let deadline, Date() >= deadline {
+      fail("Timed out; requested=\(requested), frame=\(hasFrame), possible=\(controller?.isPictureInPicturePossible == true), layer=\(displayLayer.status.rawValue), error=\(String(describing: displayLayer.error))")
+      controller?.stopPictureInPicture()
+      return
+    }
+    guard !requested, hasFrame, let controller, controller.isPictureInPicturePossible else { return }
+    requested = true
+    controller.invalidatePlaybackState()
+    controller.startPictureInPicture()
+  }
+
+  private func finish(_ success: Bool, error: String? = nil) {
+    watchdog?.invalidate(); watchdog = nil
+    deadline = nil
+    requested = false
+    let completion = startCompletion
+    startCompletion = nil
+    completion?(success, error)
+  }
+
+  private func fail(_ message: String) {
+    let detail = "[\(Self.revision)] \(message)"
+    onFailure(detail)
+    finish(false, error: detail)
   }
 
   func stop() {
-    timer?.invalidate()
-    timer = nil
+    if isStarting { finish(false, error: "[\(Self.revision)] PiP start cancelled") }
     controller?.stopPictureInPicture()
+  }
+
+  func dispose() {
+    guard !disposed else { return }
+    disposed = true
+    stop()
+    controller?.delegate = nil
+    controller = nil
     active = false
-    if let renderContext {
-      mpv_render_context_free(renderContext)
-      self.renderContext = nil
-    }
   }
 
-  func setPlaying(_ value: Bool) {
-    playing = value
-    onPlaybackChange(value)
-    controller?.invalidatePlaybackState()
+  func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
+    guard self.controller === controller else { return }
+    active = true
+    onActiveChange(true)
+    finish(true)
   }
 
-  private func makeRenderContext() -> Bool {
-    if renderContext != nil { return controller != nil }
-    let api = UnsafeMutableRawPointer(mutating: (MPV_RENDER_API_TYPE_SW as NSString).utf8String)
-    var params = [
-      mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: api),
-      mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
-    ]
-    guard mpv_render_context_create(&renderContext, handle, &params) >= 0 else { return false }
-    let source = AVPictureInPictureController.ContentSource(
-      sampleBufferDisplayLayer: displayLayer,
-      playbackDelegate: self
-    )
-    controller = AVPictureInPictureController(contentSource: source)
-    return controller != nil
+  func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
+    guard self.controller === controller else { return }
+    active = false
+    onActiveChange(false)
+    if isStarting { finish(false, error: "[\(Self.revision)] PiP stopped before didStart") }
   }
 
-  private func renderFrame() {
-    guard let renderContext, size.width > 0, size.height > 0 else { return }
-    var pixelBuffer: CVPixelBuffer?
-    let attrs: [CFString: Any] = [
-      kCVPixelBufferIOSurfacePropertiesKey: [:],
-      kCVPixelBufferMetalCompatibilityKey: true,
-    ]
-    guard CVPixelBufferCreate(kCFAllocatorDefault, Int(size.width), Int(size.height), kCVPixelFormatType_32BGRA, attrs as CFDictionary, &pixelBuffer) == kCVReturnSuccess,
-          let pixelBuffer else { return }
-    CVPixelBufferLockBaseAddress(pixelBuffer, [])
-    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
-    var wh = [Int32(size.width), Int32(size.height)]
-    let format = UnsafeMutablePointer(mutating: ("bgr0" as NSString).utf8String)
-    var stride = CVPixelBufferGetBytesPerRow(pixelBuffer)
-    guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
-    let rendered = wh.withUnsafeMutableBytes { whBytes in
-      withUnsafeMutablePointer(to: &stride) { stridePtr in
-        var params = [
-          mpv_render_param(type: MPV_RENDER_PARAM_SW_SIZE, data: whBytes.baseAddress),
-          mpv_render_param(type: MPV_RENDER_PARAM_SW_FORMAT, data: format),
-          mpv_render_param(type: MPV_RENDER_PARAM_SW_STRIDE, data: stridePtr),
-          mpv_render_param(type: MPV_RENDER_PARAM_SW_POINTER, data: base),
-          mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
-        ]
-        return mpv_render_context_render(renderContext, &params)
-      }
-    }
-    guard rendered >= 0 else { return }
-    var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30), presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
-    var sample: CMSampleBuffer?
-    guard CMSampleBufferCreateReadyWithImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer, formatDescription: nil, sampleTiming: &timing, sampleBufferOut: &sample) == noErr,
-          let sample else { return }
-    displayLayer.enqueue(sample)
+  func pictureInPictureController(_ controller: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+    guard self.controller === controller else { return }
+    active = false
+    fail(String(describing: error as NSError))
   }
 
-  func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool) {
-    setPlaying(playing)
+  func pictureInPictureController(_ controller: AVPictureInPictureController, setPlaying playing: Bool) {
+    self.playing = playing
+    onPlaybackChange(playing)
+    controller.invalidatePlaybackState()
   }
 
-  func pictureInPictureControllerTimeRangeForPlayback(_ pictureInPictureController: AVPictureInPictureController) -> CMTimeRange {
-    CMTimeRange(start: .zero, duration: .positiveInfinity)
+  func pictureInPictureControllerTimeRangeForPlayback(_ controller: AVPictureInPictureController) -> CMTimeRange {
+    CMTimeRange(start: .zero, duration: duration > 0
+      ? CMTime(seconds: duration, preferredTimescale: 600) : .positiveInfinity)
   }
 
-  func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool { !playing }
+  func pictureInPictureControllerIsPlaybackPaused(_ controller: AVPictureInPictureController) -> Bool { !playing }
 
-  func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime) {
-    // Seeking remains owned by mpv; the host can expose seek controls through JS.
+  func pictureInPictureController(_ controller: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
+
+  func pictureInPictureController(_ controller: AVPictureInPictureController, skipByInterval interval: CMTime, completion: @escaping @Sendable () -> Void) {
+    if interval.seconds.isFinite { onSeek(interval.seconds) }
+    completion()
+  }
+
+  func pictureInPictureController(_ controller: AVPictureInPictureController,
+    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completion: @escaping (Bool) -> Void) {
+    completion(displayLayer.superlayer != nil)
   }
 }

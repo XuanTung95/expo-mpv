@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 
 internal class MpvPlayer(
     context: Context,
-    private val listener: Listener,
+    @Volatile private var listener: Listener,
 ) {
     interface Listener {
         fun onPlaybackStateChange(state: String, isPlaying: Boolean)
@@ -62,6 +62,10 @@ internal class MpvPlayer(
         runOnPlayerThread {
             createMpvLocked()
         }
+    }
+
+    fun setListener(listener: Listener) {
+        this.listener = listener
     }
 
     fun release() {

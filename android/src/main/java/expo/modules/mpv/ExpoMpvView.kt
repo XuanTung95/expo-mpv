@@ -30,9 +30,7 @@ class ExpoMpvView(context: Context, appContext: AppContext) : ExpoView(context, 
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
     }
 
-    private val player = MpvPlayer(
-        context,
-        object : MpvPlayer.Listener {
+    private val listener = object : MpvPlayer.Listener {
             override fun onPlaybackStateChange(state: String, isPlaying: Boolean) {
                 onPlaybackStateChange(
                     mapOf(
@@ -100,18 +98,46 @@ class ExpoMpvView(context: Context, appContext: AppContext) : ExpoView(context, 
                     )
                 )
             }
-        },
-    )
+    }
+    private var player = MpvPlayer(context, listener)
+    private var sessionId: String? = null
+    private var lastSource: String? = null
+
+    companion object {
+        private data class Session(val player: MpvPlayer, var view: ExpoMpvView, var source: String? = null)
+        private val sessions = mutableMapOf<String, Session>()
+
+        fun releaseSession(id: String) {
+            sessions.remove(id)?.player?.release()
+        }
+    }
+
+    fun attachSession(id: String) {
+        if (sessionId == id) return
+        sessionId = id
+        val existing = sessions[id]
+        if (existing == null) {
+            sessions[id] = Session(player, this, lastSource)
+        } else {
+            player.release() // Dispose this view's temporary player.
+            player = existing.player
+            existing.view = this
+            player.setListener(listener)
+            surfaceView.holder.surface?.takeIf { it.isValid }?.let(player::setSurface)
+        }
+    }
+
+    private fun ownsSurface(): Boolean = sessionId?.let { sessions[it]?.view === this } ?: true
 
     private val surfaceCallback = object : SurfaceHolder.Callback {
         override fun surfaceCreated(holder: SurfaceHolder) {
-            player.setSurface(holder.surface)
+            if (ownsSurface()) player.setSurface(holder.surface)
         }
 
         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
 
         override fun surfaceDestroyed(holder: SurfaceHolder) {
-            player.setSurface(null)
+            if (ownsSurface()) player.setSurface(null)
         }
     }
 
@@ -122,12 +148,13 @@ class ExpoMpvView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     override fun onDetachedFromWindow() {
-        destroy()
+        if (sessionId == null) destroy()
         super.onDetachedFromWindow()
     }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
+        if (!ownsSurface()) return
         if (visibility == View.GONE || visibility == View.INVISIBLE) {
             player.setPropertyString("vid", "no")
         } else {
@@ -140,10 +167,14 @@ class ExpoMpvView(context: Context, appContext: AppContext) : ExpoView(context, 
         isDestroyed = true
         surfaceView.holder.removeCallback(surfaceCallback)
         player.setSurface(null)
-        player.release()
+        if (sessionId == null) player.release()
     }
 
     fun loadFile(url: String) {
+        lastSource = url
+        val session = sessionId?.let(sessions::get)
+        if (session?.source == url) return
+        if (session != null) session.source = url
         player.loadFile(url)
     }
 
@@ -160,6 +191,7 @@ class ExpoMpvView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     fun stop() {
+        sessionId?.let { sessions[it]?.source = null }
         player.stop()
     }
 

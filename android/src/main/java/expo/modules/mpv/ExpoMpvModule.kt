@@ -7,6 +7,10 @@ class ExpoMpvModule : Module() {
     override fun definition() = ModuleDefinition {
         Name("ExpoMpv")
 
+        AsyncFunction("releaseSession") { sessionId: String ->
+            ExpoMpvView.releaseSession(sessionId)
+        }
+
         View(ExpoMpvView::class) {
             // Events (same as iOS)
             Events(
@@ -23,6 +27,10 @@ class ExpoMpvModule : Module() {
             )
 
             // Props (same as iOS)
+            Prop("sessionId") { view: ExpoMpvView, sessionId: String? ->
+                if (sessionId != null) view.attachSession(sessionId)
+            }
+
             Prop("source") { view: ExpoMpvView, source: String? ->
                 if (source != null) {
                     view.loadFile(source)
